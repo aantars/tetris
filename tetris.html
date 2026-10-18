@@ -1,0 +1,724 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tetris Clone</title>
+<style>
+  html, body { height: 100%; margin: 0; background: #000; overflow: hidden; }
+  body { display: flex; align-items: center; justify-content: center; }
+  /* --u is one playfield cell. Everything is sized in cells so the playfield,
+     next preview and side panel scale together: 10u playfield + 5u next
+     preview (4u plus margins) + 5u panel = 20u, within the 21u of width. */
+  :root { --u: min(calc((100vh - 32px) / 20), calc(100vw / 21)); }
+  #playfield { background: #111; width: calc(var(--u) * 10); height: calc(var(--u) * 20); }
+  #next { background: #111; width: calc(var(--u) * 4); height: calc(var(--u) * 4); align-self: flex-start; margin: calc(var(--u) * 0.5); }
+  #panel { color: #eee; font: calc(var(--u) * 0.55) monospace; width: calc(var(--u) * 5); }
+  #panel div { margin-bottom: calc(var(--u) * 0.4); }
+  #panel span { display: block; font-size: calc(var(--u) * 0.8); }
+</style>
+</head>
+<body>
+<canvas id="playfield"></canvas>
+<canvas id="next"></canvas>
+<div id="panel">
+  <div>SCORE<span id="score">0</span></div>
+  <div>LEVEL<span id="level">0</span></div>
+  <div>LINES<span id="lines">0</span></div>
+  <div>HIGH SCORE<span id="highscore">0</span></div>
+  <div>SOUND (M)<span id="sound">On</span></div>
+</div>
+<script>
+﻿// Pure game logic: no DOM, no globals. Public interface:
+//   newGame(random)            -> state
+//   update(state, event, random) -> next state   (never mutates `state`)
+// `random` is an injectable function returning a number in [0, 1).
+// This file is both required by Node tests and inlined into the browser page.
+
+const WIDTH = 10;
+const HEIGHT = 20;
+const TYPES = ['I', 'O', 'T', 'S', 'Z', 'J', 'L'];
+
+const COLORS = {
+  I: '#00e5ff',
+  O: '#ffeb3b',
+  T: '#aa00ff',
+  S: '#00e676',
+  Z: '#ff1744',
+  J: '#2979ff',
+  L: '#ff9100',
+};
+
+// SPAWN[type] = { size, cells }: the spawn orientation as four [dx, dy]
+// cells inside a size x size box anchored at the active tetromino's (x, y).
+const SPAWN = {
+  I: { size: 4, cells: [[0, 1], [1, 1], [2, 1], [3, 1]] },
+  O: { size: 2, cells: [[0, 0], [1, 0], [0, 1], [1, 1]] },
+  T: { size: 3, cells: [[0, 0], [1, 0], [2, 0], [1, 1]] },
+  S: { size: 3, cells: [[1, 0], [2, 0], [0, 1], [1, 1]] },
+  Z: { size: 3, cells: [[0, 0], [1, 0], [1, 1], [2, 1]] },
+  J: { size: 3, cells: [[0, 0], [1, 0], [2, 0], [2, 1]] },
+  L: { size: 3, cells: [[0, 0], [1, 0], [2, 0], [0, 1]] },
+};
+
+// SHAPES[type][rotation]: the four clockwise orientations, each a rotation of
+// the previous one within the box.
+const SHAPES = {};
+for (const type of Object.keys(SPAWN)) {
+  const { size, cells } = SPAWN[type];
+  SHAPES[type] = [cells];
+  for (let r = 1; r < 4; r++) {
+    SHAPES[type].push(SHAPES[type][r - 1].map(([dx, dy]) => [size - 1 - dy, dx]));
+  }
+}
+
+function randomType(random) {
+  return TYPES[Math.floor(random() * TYPES.length)];
+}
+
+function spawn(type) {
+  const cells = SHAPES[type][0];
+  const width = Math.max(...cells.map(([dx]) => dx)) + 1;
+  return { type, rotation: 0, cells, x: Math.floor((WIDTH - width) / 2), y: 0 };
+}
+
+function emptyPlayfield() {
+  return Array.from({ length: HEIGHT }, () => Array(WIDTH).fill(null));
+}
+
+function newGame(random = Math.random) {
+  const first = randomType(random);
+  const next = randomType(random);
+  return {
+    status: 'playing',
+    playfield: emptyPlayfield(),
+    active: spawn(first),
+    next,
+    score: 0,
+    level: 0,
+    lines: 0,
+  };
+}
+
+// The screen shown on load: a game waiting for `start`.
+function startScreen(random = Math.random) {
+  return { ...newGame(random), status: 'start' };
+}
+
+// True if the active tetromino, shifted by (dx, dy), stays inside the
+// playfield walls/floor and overlaps no settled block.
+function fits(playfield, active, dx, dy) {
+  return active.cells.every(([cx, cy]) => {
+    const x = active.x + cx + dx;
+    const y = active.y + cy + dy;
+    return x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT && playfield[y][x] === null;
+  });
+}
+
+function moved(state, dx, dy) {
+  return { ...state, active: { ...state.active, x: state.active.x + dx, y: state.active.y + dy } };
+}
+
+// Rotate by `steps` quarter turns clockwise; rejected (state unchanged) if it
+// would collide. No wall kicks.
+function rotated(state, steps) {
+  const rotation = (state.active.rotation + steps) % 4;
+  const active = { ...state.active, rotation, cells: SHAPES[state.active.type][rotation] };
+  return fits(state.playfield, active, 0, 0) ? { ...state, active } : state;
+}
+
+// NES gravity: frames per row at 60 fps, indexed by level (0-18); levels
+// 19-28 take 2 frames and 29+ take 1.
+const GRAVITY_FRAMES = [48, 43, 38, 33, 28, 23, 18, 13, 8, 6, 5, 5, 5, 4, 4, 4, 3, 3, 3];
+
+// Milliseconds between gravity ticks at the given level.
+function gravityInterval(level) {
+  const frames = level < GRAVITY_FRAMES.length ? GRAVITY_FRAMES[level] : level < 29 ? 2 : 1;
+  return (frames * 1000) / 60;
+}
+
+const SOFT_DROP_MS = 50;
+
+// Milliseconds between soft-drop steps: 50 ms, but never slower than gravity.
+function softDropInterval(level) {
+  return Math.min(SOFT_DROP_MS, gravityInterval(level));
+}
+
+const LINE_SCORES = [0, 40, 100, 300, 1200];
+const LINES_PER_LEVEL = 10;
+
+// Remove every full row, letting the rows above drop; returns the new
+// playfield and the number of rows cleared.
+function clearLines(playfield) {
+  const kept = playfield.filter((row) => row.some((cell) => cell === null));
+  const cleared = playfield.length - kept.length;
+  const empty = Array.from({ length: cleared }, () => Array(WIDTH).fill(null));
+  return { playfield: [...empty, ...kept], cleared };
+}
+
+// Settle the active tetromino into the playfield, clear full rows (scoring
+// and levelling up), and spawn the next one, drawing a fresh next preview.
+function lock(state, random) {
+  const { active } = state;
+  const playfield = state.playfield.map((row) => row.slice());
+  for (const [cx, cy] of active.cells) playfield[active.y + cy][active.x + cx] = active.type;
+  const { playfield: settled, cleared } = clearLines(playfield);
+  const lines = state.lines + cleared;
+  const spawned = spawn(state.next);
+  return {
+    ...state,
+    status: fits(settled, spawned, 0, 0) ? state.status : 'gameover',
+    playfield: settled,
+    active: spawned,
+    next: randomType(random),
+    score: state.score + LINE_SCORES[cleared] * (state.level + 1),
+    lines,
+    level: Math.max(state.level, Math.floor(lines / LINES_PER_LEVEL)),
+  };
+}
+
+// Lock the active tetromino if it can fall no further (no lock delay).
+function lockIfGrounded(state, random) {
+  return fits(state.playfield, state.active, 0, 1) ? state : lock(state, random);
+}
+
+// Gravity: fall one row; locks the moment it can fall no further.
+function tick(state, random) {
+  const fallen = fits(state.playfield, state.active, 0, 1) ? moved(state, 0, 1) : state;
+  return lockIfGrounded(fallen, random);
+}
+
+// Soft drop: fall one row for 1 point; locks the moment it can fall no further.
+function softDrop(state, random) {
+  if (!fits(state.playfield, state.active, 0, 1)) return state;
+  return lockIfGrounded({ ...moved(state, 0, 1), score: state.score + 1 }, random);
+}
+
+// Hard drop: fall to the lowest reachable row for 2 points per row, then lock.
+function hardDrop(state, random) {
+  let rows = 0;
+  while (fits(state.playfield, state.active, 0, rows + 1)) rows++;
+  return lock({ ...moved(state, 0, rows), score: state.score + 2 * rows }, random);
+}
+// Events: { type: 'left' | 'right' | 'rotateCW' | 'rotateCCW' | 'softDrop' | 'hardDrop' | 'tick' | 'start' | 'restart' | 'pause' }.
+// status is 'start' | 'playing' | 'paused' | 'gameover'; movement, rotation,
+// gravity and drops only act while playing.
+function update(state, event, random = Math.random) {
+  switch (event.type) {
+    case 'start':
+      return state.status === 'start' || state.status === 'gameover' ? newGame(random) : state;
+    case 'restart':
+      return newGame(random);
+    case 'pause':
+      if (state.status === 'playing') return { ...state, status: 'paused' };
+      if (state.status === 'paused') return { ...state, status: 'playing' };
+      return state;
+  }
+  if (state.status !== 'playing') return state;
+  switch (event.type) {
+    case 'left':
+      return fits(state.playfield, state.active, -1, 0) ? moved(state, -1, 0) : state;
+    case 'right':
+      return fits(state.playfield, state.active, 1, 0) ? moved(state, 1, 0) : state;
+    case 'rotateCW':
+      return rotated(state, 1);
+    case 'rotateCCW':
+      return rotated(state, 3);
+    case 'tick':
+      return tick(state, random);
+    case 'softDrop':
+      return softDrop(state, random);
+    case 'hardDrop':
+      return hardDrop(state, random);
+    default:
+      return state;
+  }
+}
+
+const logic = { newGame, startScreen, update, gravityInterval, softDropInterval, WIDTH, HEIGHT, TYPES, COLORS, SHAPES };
+if (typeof module !== 'undefined') module.exports = logic;
+
+</script>
+<script>
+// Auto-repeat (DAS) timing for held Left/Right. Pure: no DOM, no clock;
+// callers pass timestamps in ms. Holds no game rules.
+
+// Tune the feel here.
+const DAS_DELAY_MS = 170; // hold time before repeating starts
+const DAS_INTERVAL_MS = 50; // time between repeats once started
+
+function createRepeater({ delay = DAS_DELAY_MS, interval = DAS_INTERVAL_MS } = {}) {
+  const held = []; // held directions, most recent last
+  let nextAt = 0; // when the active (most recent) direction next repeats
+
+  return {
+    // Returns the directions to move right now.
+    press(dir, now) {
+      if (held.includes(dir)) return [];
+      held.push(dir);
+      nextAt = now + delay;
+      return [dir];
+    },
+    release(dir, now) {
+      const i = held.indexOf(dir);
+      if (i < 0) return;
+      const wasActive = i === held.length - 1;
+      held.splice(i, 1);
+      if (wasActive && held.length) nextAt = now + interval;
+    },
+    // Returns the directions whose repeat is due by `now`.
+    poll(now) {
+      const moves = [];
+      if (!held.length) return moves;
+      const dir = held[held.length - 1];
+      while (nextAt <= now) {
+        moves.push(dir);
+        nextAt += interval;
+      }
+      return moves;
+    },
+  };
+}
+
+const repeat = { createRepeater, DAS_DELAY_MS, DAS_INTERVAL_MS };
+if (typeof module !== 'undefined') module.exports = repeat;
+
+</script>
+<script>
+// Keyboard mapping. Pure: no DOM. Decides what each key event means and how
+// it is delivered; main.js performs the delivery. Holds no game rules.
+
+const KEYS = {
+  ArrowLeft: 'left',
+  ArrowRight: 'right',
+  ArrowUp: 'rotateCW',
+  x: 'rotateCW',
+  X: 'rotateCW',
+  z: 'rotateCCW',
+  Z: 'rotateCCW',
+  ArrowDown: 'softDrop',
+  ' ': 'hardDrop',
+  Enter: 'start',
+  p: 'pause',
+  P: 'pause',
+  r: 'restart',
+  R: 'restart',
+  m: 'mute',
+  M: 'mute',
+};
+
+// Delivery modes: 'repeater' (auto-repeat DAS, left/right only), 'hold'
+// (soft drop while held), 'once' (one event per physical key press).
+const REPEATER_TYPES = ['left', 'right'];
+
+function modeOf(type) {
+  if (REPEATER_TYPES.includes(type)) return 'repeater';
+  return type === 'softDrop' ? 'hold' : 'once';
+}
+
+// -> { type, mode } or null. `isRepeat` is the browser's KeyboardEvent.repeat.
+function keyDown(key, isRepeat) {
+  const type = KEYS[key];
+  if (!type) return null;
+  const mode = modeOf(type);
+  if (mode === 'once' && isRepeat) return null;
+  return { type, mode };
+}
+
+function keyUp(key) {
+  const type = KEYS[key];
+  return type ? { type, mode: modeOf(type) } : null;
+}
+
+const keys = { KEYS, keyDown, keyUp };
+if (typeof module !== 'undefined') module.exports = keys;
+
+</script>
+<script>
+// High score decision and persistence. No DOM: callers pass in a storage
+// object (localStorage in the browser); any storage failure is swallowed so
+// the game works without it. Holds no game rules.
+
+const HIGH_SCORE_KEY = 'tetris.highScore';
+
+// The high score after a game reaches `score`.
+function nextHighScore(high, score) {
+  return score > high ? score : high;
+}
+
+function loadHighScore(storage) {
+  try {
+    const n = Number.parseInt(storage.getItem(HIGH_SCORE_KEY), 10);
+    return n > 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function saveHighScore(storage, value) {
+  try {
+    storage.setItem(HIGH_SCORE_KEY, String(value));
+  } catch {
+    // storage unavailable or full: keep playing without persistence
+  }
+}
+
+const highscore = { nextHighScore, loadHighScore, saveHighScore, HIGH_SCORE_KEY };
+if (typeof module !== 'undefined') module.exports = highscore;
+
+</script>
+<script>
+// Sound triggers derived by diffing two logic states. Pure: no DOM, no audio.
+// Holds no game rules; the presentation layer plays what this names.
+
+const countFilledCells = (playfield) => playfield.flat().filter(Boolean).length;
+
+// Returns the sound names ('move' | 'rotate' | 'lock' | 'lineclear' | 'gameover')
+// to play for the transition prev -> next.
+function soundsFor(prev, next) {
+  if (prev.status !== 'playing') return [];
+  if (next.status === 'gameover') return ['gameover'];
+  if (next.status !== 'playing') return [];
+  if (next.lines > prev.lines) return ['lineclear'];
+  // A lock without a clear adds exactly the four blocks of the tetromino
+  // (a restart empties the playfield instead, and stays silent).
+  if (countFilledCells(next.playfield) === countFilledCells(prev.playfield) + 4) return ['lock'];
+  if (JSON.stringify(next.active.cells) !== JSON.stringify(prev.active.cells)) return ['rotate'];
+  if (next.active.x !== prev.active.x) return ['move'];
+  return [];
+}
+
+const SOUND_NAMES = ['move', 'rotate', 'lock', 'lineclear', 'gameover'];
+
+const sounds = { soundsFor, SOUND_NAMES };
+if (typeof module !== 'undefined') module.exports = sounds;
+
+</script>
+<script>
+// Synthesized sound effects (Web Audio, no audio files) and mute state.
+// The AudioContext is created lazily on the first play()/unlock() call, which
+// callers make from a user gesture; if audio is unavailable everything is a no-op.
+
+// Each sound is a list of [frequency Hz, start s, duration s, waveform, volume].
+const SOUNDS = {
+  move: [[220, 0, 0.04, 'square', 0.05]],
+  rotate: [[440, 0, 0.05, 'square', 0.06], [660, 0.05, 0.05, 'square', 0.06]],
+  lock: [[110, 0, 0.12, 'triangle', 0.2]],
+  lineclear: [[523, 0, 0.1, 'square', 0.08], [659, 0.1, 0.1, 'square', 0.08], [784, 0.2, 0.1, 'square', 0.08], [1047, 0.3, 0.2, 'square', 0.08]],
+  gameover: [[392, 0, 0.2, 'sawtooth', 0.08], [330, 0.2, 0.2, 'sawtooth', 0.08], [262, 0.4, 0.2, 'sawtooth', 0.08], [196, 0.6, 0.5, 'sawtooth', 0.08]],
+};
+
+// Background music: "Korobeiniki", a public-domain Russian folk song (1861).
+// [frequency Hz or 0 for a rest, length in beats].
+const [A4, B4, C5, D5, E5, F5, G5, A5] = [440, 494, 523, 587, 659, 698, 784, 880];
+const MELODY = [
+  [E5, 1], [B4, 0.5], [C5, 0.5], [D5, 1], [C5, 0.5], [B4, 0.5],
+  [A4, 1], [A4, 0.5], [C5, 0.5], [E5, 1], [D5, 0.5], [C5, 0.5],
+  [B4, 1.5], [C5, 0.5], [D5, 1], [E5, 1],
+  [C5, 1], [A4, 1], [A4, 1], [0, 1],
+  [D5, 1.5], [F5, 0.5], [A5, 1], [G5, 0.5], [F5, 0.5],
+  [E5, 1.5], [C5, 0.5], [E5, 1], [D5, 0.5], [C5, 0.5],
+  [B4, 1], [B4, 0.5], [C5, 0.5], [D5, 1], [E5, 1],
+  [C5, 1], [A4, 1], [A4, 1], [0, 1],
+];
+const BEAT = 0.3; // seconds per beat
+const MUSIC_VOLUME = 0.04;
+const LOOKAHEAD = 0.3; // seconds of music scheduled ahead of the clock
+
+function createAudio(AudioContextClass = typeof window !== 'undefined' ? window.AudioContext || window.webkitAudioContext : undefined) {
+  let ctx = null;
+  let muted = false;
+  let musicWanted = false;
+  let musicTimer = null;
+  let musicOut = null; // gain node the current music run plays through
+  let noteIndex = 0;
+  let nextNoteTime = 0;
+
+  function scheduleMusic() {
+    for (; nextNoteTime < ctx.currentTime + LOOKAHEAD; noteIndex = (noteIndex + 1) % MELODY.length) {
+      const [freq, beats] = MELODY[noteIndex];
+      const dur = beats * BEAT;
+      if (freq) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'square';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(MUSIC_VOLUME, nextNoteTime);
+        gain.gain.exponentialRampToValueAtTime(0.0001, nextNoteTime + dur * 0.95);
+        osc.connect(gain);
+        gain.connect(musicOut);
+        osc.start(nextNoteTime);
+        osc.stop(nextNoteTime + dur);
+      }
+      nextNoteTime += dur;
+    }
+  }
+
+  function stopMusicNow() {
+    clearInterval(musicTimer);
+    musicTimer = null;
+    if (musicOut) {
+      musicOut.disconnect(); // silences notes already scheduled
+      musicOut = null;
+    }
+  }
+
+  function syncMusic() {
+    const shouldPlay = musicWanted && !muted;
+    if (!shouldPlay) {
+      stopMusicNow();
+      return;
+    }
+    if (musicTimer !== null) return;
+    try {
+      const c = context();
+      if (!c) return;
+      musicOut = c.createGain();
+      musicOut.connect(c.destination);
+      nextNoteTime = c.currentTime + 0.05;
+      scheduleMusic();
+      musicTimer = setInterval(scheduleMusic, 100);
+    } catch (e) {
+      stopMusicNow(); // audio failed: the game carries on silently
+    }
+  }
+
+  function context() {
+    if (!ctx && AudioContextClass) {
+      try {
+        ctx = new AudioContextClass();
+      } catch (e) {
+        ctx = null;
+      }
+    }
+    if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+    return ctx;
+  }
+
+  return {
+    // Call from a user gesture so the browser allows audio to start.
+    unlock() {
+      context();
+    },
+    play(name) {
+      const notes = SOUNDS[name];
+      if (!notes) throw new Error(`Unknown sound: ${name}`);
+      if (muted) return;
+      try {
+        const c = context();
+        if (!c) return;
+        for (const [freq, start, dur, wave, vol] of notes) {
+          const osc = c.createOscillator();
+          const gain = c.createGain();
+          const t = c.currentTime + start;
+          osc.type = wave;
+          osc.frequency.value = freq;
+          gain.gain.setValueAtTime(vol, t);
+          gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+          osc.connect(gain);
+          gain.connect(c.destination);
+          osc.start(t);
+          osc.stop(t + dur);
+        }
+      } catch (e) {
+        // audio failed: the game carries on silently
+      }
+    },
+    // Music plays only while wanted and not muted; it resumes from where it
+    // stopped (the melody position is kept across pauses).
+    setMusic(wanted) {
+      musicWanted = wanted;
+      syncMusic();
+    },
+    toggleMute() {
+      muted = !muted;
+      syncMusic();
+      return muted;
+    },
+    get muted() {
+      return muted;
+    },
+  };
+}
+
+const audioModule = { createAudio, SOUNDS, MELODY };
+if (typeof module !== 'undefined') module.exports = audioModule;
+
+</script>
+<script>
+﻿// Presentation layer: rendering, keyboard input and the gravity timer.
+// Holds no game rules. Uses globals from the inlined logic.js
+// (newGame, update, WIDTH, HEIGHT, COLORS), repeat.js (createRepeater) and keys.js (keyDown, keyUp).
+
+const CELL = 30;
+
+const canvas = document.getElementById('playfield');
+canvas.width = WIDTH * CELL;
+canvas.height = HEIGHT * CELL;
+const ctx = canvas.getContext('2d');
+
+let state = startScreen();
+
+// Best score, persisted in localStorage (may be unavailable; guarded in highscore.js).
+function getStorage() {
+  try { return window.localStorage; } catch { return undefined; }
+}
+const storage = getStorage();
+let highScore = loadHighScore(storage);
+
+const OVERLAYS = {
+  start: ['Press Enter to start'],
+  paused: ['Paused', 'P to resume'],
+  gameover: ['Game over', 'Press Enter to restart'],
+};
+
+function drawOverlay() {
+  const lines = OVERLAYS[state.status];
+  if (!lines) return;
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 28px sans-serif';
+  ctx.fillText(lines[0], canvas.width / 2, canvas.height / 2);
+  if (lines[1]) {
+    ctx.font = '18px sans-serif';
+    ctx.fillText(lines[1], canvas.width / 2, canvas.height / 2 + 32);
+  }
+}
+
+function drawCell(x, y, type) {
+  ctx.fillStyle = COLORS[type];
+  ctx.fillRect(x * CELL, y * CELL, CELL - 1, CELL - 1);
+}
+
+function renderPanel() {
+  const best = nextHighScore(highScore, state.score);
+  if (best !== highScore) {
+    highScore = best;
+    saveHighScore(storage, highScore);
+  }
+  document.getElementById('highscore').textContent = highScore;
+  for (const key of ['score', 'level', 'lines']) {
+    document.getElementById(key).textContent = state[key];
+  }
+}
+
+function render() {
+  renderPanel();
+  ctx.fillStyle = '#111';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  state.playfield.forEach((row, y) => row.forEach((type, x) => type && drawCell(x, y, type)));
+  const { active } = state;
+  for (const [dx, dy] of active.cells) drawCell(active.x + dx, active.y + dy, active.type);
+  drawOverlay();
+  renderNext();
+}
+
+// Next preview: the upcoming tetromino in its spawn orientation.
+const NEXT_SIZE = 120; // canvas side in px (CSS scales it with the window)
+const NEXT_PADDING = 15;
+const NEXT_CELL = 24;
+const nextCanvas = document.getElementById('next');
+nextCanvas.width = NEXT_SIZE;
+nextCanvas.height = NEXT_SIZE;
+const nextCtx = nextCanvas.getContext('2d');
+function renderNext() {
+  nextCtx.fillStyle = '#111';
+  nextCtx.fillRect(0, 0, NEXT_SIZE, NEXT_SIZE);
+  nextCtx.fillStyle = COLORS[state.next];
+  for (const [dx, dy] of SHAPES[state.next][0]) {
+    nextCtx.fillRect(NEXT_PADDING + dx * NEXT_CELL, NEXT_PADDING + dy * NEXT_CELL, NEXT_CELL - 1, NEXT_CELL - 1);
+  }
+}
+
+const audio = createAudio();
+
+function renderSound() {
+  document.getElementById('sound').textContent = audio.muted ? 'Muted' : 'On';
+}
+
+// Gravity timer: when the last fall happened (ms).
+let lastFall = performance.now();
+
+function send(event) {
+  const prev = state;
+  state = update(state, event);
+  // A game that starts, restarts or resumes gets a full gravity interval
+  // before its first fall.
+  if (state.status === 'playing' && (prev.status !== 'playing' || event.type === 'restart')) {
+    lastFall = performance.now();
+  }
+  for (const name of soundsFor(prev, state)) audio.play(name);
+  audio.setMusic(state.status === 'playing');
+  render();
+}
+
+// Left/Right auto-repeat (DAS); timing values live in src/repeat.js.
+// Only left/right use it: every other key fires once per physical press.
+const repeater = createRepeater();
+
+// Soft drop: Down held falls one cell per softDropInterval(level), starting
+// immediately (no DAS delay, so it does not use the repeater).
+let softDropTimer = null;
+
+function softDropStep() {
+  send({ type: 'softDrop' });
+  softDropTimer = setTimeout(softDropStep, softDropInterval(state.level));
+}
+
+function stopSoftDrop() {
+  clearTimeout(softDropTimer);
+  softDropTimer = null;
+}
+
+document.addEventListener('keydown', (e) => {
+  audio.unlock(); // audio may only start after a user interaction
+  const action = keyDown(e.key, e.repeat);
+  if (!action) return;
+  e.preventDefault();
+  if (action.mode === 'repeater') {
+    for (const move of repeater.press(action.type, performance.now())) send({ type: move });
+  } else if (action.mode === 'hold') {
+    if (softDropTimer === null) softDropStep();
+  } else if (action.type === 'mute') {
+    audio.toggleMute();
+    renderSound();
+  } else {
+    send({ type: action.type });
+  }
+});
+
+document.addEventListener('keyup', (e) => {
+  const action = keyUp(e.key);
+  if (!action) return;
+  if (action.mode === 'repeater') repeater.release(action.type, performance.now());
+  else if (action.mode === 'hold') stopSoftDrop();
+});
+
+window.addEventListener('blur', () => {
+  for (const type of ['left', 'right']) repeater.release(type, performance.now());
+  stopSoftDrop();
+});
+
+setInterval(() => {
+  for (const move of repeater.poll(performance.now())) send({ type: move });
+}, 10);
+
+// Gravity: the interval for the current level is read once per pass, so a
+// level-up changes the fall speed from the next pass on.
+setInterval(() => {
+  const now = performance.now();
+  const interval = gravityInterval(state.level);
+  for (let n = 0; n < 5 && now - lastFall >= interval; n++) {
+    lastFall += interval;
+    send({ type: 'tick' });
+  }
+  if (now - lastFall >= interval) lastFall = now;
+}, 5);
+
+render();
+
+</script>
+</body>
+</html>

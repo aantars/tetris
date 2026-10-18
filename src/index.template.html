@@ -1,0 +1,53 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tetris Clone</title>
+<style>
+  html, body { height: 100%; margin: 0; background: #000; overflow: hidden; }
+  body { display: flex; align-items: center; justify-content: center; }
+  /* --u is one playfield cell. Everything is sized in cells so the playfield,
+     next preview and side panel scale together: 10u playfield + 5u next
+     preview (4u plus margins) + 5u panel = 20u, within the 21u of width. */
+  :root { --u: min(calc((100vh - 32px) / 20), calc(100vw / 21)); }
+  #playfield { background: #111; width: calc(var(--u) * 10); height: calc(var(--u) * 20); }
+  #next { background: #111; width: calc(var(--u) * 4); height: calc(var(--u) * 4); align-self: flex-start; margin: calc(var(--u) * 0.5); }
+  #panel { color: #eee; font: calc(var(--u) * 0.55) monospace; width: calc(var(--u) * 5); }
+  #panel div { margin-bottom: calc(var(--u) * 0.4); }
+  #panel span { display: block; font-size: calc(var(--u) * 0.8); }
+</style>
+</head>
+<body>
+<canvas id="playfield"></canvas>
+<canvas id="next"></canvas>
+<div id="panel">
+  <div>SCORE<span id="score">0</span></div>
+  <div>LEVEL<span id="level">0</span></div>
+  <div>LINES<span id="lines">0</span></div>
+  <div>HIGH SCORE<span id="highscore">0</span></div>
+  <div>SOUND (M)<span id="sound">On</span></div>
+</div>
+<script>
+/*{{LOGIC}}*/
+</script>
+<script>
+/*{{REPEAT}}*/
+</script>
+<script>
+/*{{KEYS}}*/
+</script>
+<script>
+/*{{HIGHSCORE}}*/
+</script>
+<script>
+/*{{SOUNDS}}*/
+</script>
+<script>
+/*{{AUDIO}}*/
+</script>
+<script>
+/*{{MAIN}}*/
+</script>
+</body>
+</html>
