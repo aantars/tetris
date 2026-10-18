@@ -3,7 +3,6 @@
 // (newGame, update, WIDTH, HEIGHT, COLORS) and repeat.js (createRepeater).
 
 const CELL = 30;
-const GRAVITY_MS = 800; // constant for now; the gravity ticket adds the level table
 
 const canvas = document.getElementById('playfield');
 canvas.width = WIDTH * CELL;
@@ -62,5 +61,15 @@ setInterval(() => {
   for (const move of repeater.poll(performance.now())) send({ type: move });
 }, 10);
 
-setInterval(() => send({ type: 'tick' }), GRAVITY_MS);
+// Gravity: re-read the interval for the current level on every check, so a
+// level-up changes the fall speed immediately.
+let lastFall = performance.now();
+setInterval(() => {
+  const now = performance.now();
+  for (let n = 0; n < 5 && now - lastFall >= gravityInterval(state.level); n++) {
+    lastFall += gravityInterval(state.level);
+    send({ type: 'tick' });
+  }
+  if (now - lastFall >= gravityInterval(state.level)) lastFall = now;
+}, 5);
 render();
