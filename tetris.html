@@ -5,9 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tetris Clone</title>
 <style>
-  html, body { height: 100%; margin: 0; background: #000; }
+  html, body { height: 100%; margin: 0; background: #000; overflow: hidden; }
   body { display: flex; align-items: center; justify-content: center; }
-  canvas { background: #111; max-height: 100vh; }
+  /* 1:2 aspect keeps cells square; height fits the window minus the panel's width */
+  canvas { background: #111; aspect-ratio: 1 / 2; height: min(calc(100vh - 32px), calc((100vw - 200px) * 2)); }
   #panel { margin-left: 16px; color: #eee; font: 16px monospace; min-width: 120px; }
   #panel div { margin-bottom: 12px; }
   #panel span { display: block; font-size: 24px; }
