@@ -48,7 +48,20 @@ function emptyPlayfield() {
 function newGame(random = Math.random) {
   const first = randomType(random);
   const next = randomType(random);
-  return { playfield: emptyPlayfield(), active: spawn(first), next, score: 0, level: 0, lines: 0 };
+  return {
+    status: 'playing',
+    playfield: emptyPlayfield(),
+    active: spawn(first),
+    next,
+    score: 0,
+    level: 0,
+    lines: 0,
+  };
+}
+
+// The screen shown on load: a game waiting for `start`.
+function startScreen(random = Math.random) {
+  return { ...newGame(random), status: 'start' };
 }
 
 // True if the active tetromino, shifted by (dx, dy), stays inside the
@@ -85,10 +98,12 @@ function lock(state, random) {
   for (const [cx, cy] of active.cells) playfield[active.y + cy][active.x + cx] = active.type;
   const { playfield: settled, cleared } = clearLines(playfield);
   const lines = state.lines + cleared;
+  const spawned = spawn(state.next);
   return {
     ...state,
+    status: fits(settled, spawned, 0, 0) ? state.status : 'gameover',
     playfield: settled,
-    active: spawn(state.next),
+    active: spawned,
     next: randomType(random),
     score: state.score + LINE_SCORES[cleared] * (state.level + 1),
     lines,
@@ -102,6 +117,7 @@ function tick(state, random) {
   return fits(fallen.playfield, fallen.active, 0, 1) ? fallen : lock(fallen, random);
 }
 
+<<<<<<< HEAD
 // Soft drop: fall one row for 1 point; locks the moment it can fall no further.
 function softDrop(state, random) {
   if (!fits(state.playfield, state.active, 0, 1)) return state;
@@ -118,7 +134,23 @@ function hardDrop(state, random) {
 
 // Events: { type: 'left' | 'right' | 'tick' | 'softDrop' | 'hardDrop' }. Later
 // tickets add rotate, start, restart and pause as further cases.
+=======
+// Events: { type: 'left' | 'right' | 'tick' | 'start' | 'pause' | 'restart' }.
+// status is 'start' | 'playing' | 'paused' | 'gameover'; movement and gravity
+// only act while playing. Later tickets add rotate, soft drop and hard drop.
+>>>>>>> integration/tetris-clone
 function update(state, event, random = Math.random) {
+  switch (event.type) {
+    case 'start':
+      return state.status === 'start' || state.status === 'gameover' ? newGame(random) : state;
+    case 'restart':
+      return newGame(random);
+    case 'pause':
+      if (state.status === 'playing') return { ...state, status: 'paused' };
+      if (state.status === 'paused') return { ...state, status: 'playing' };
+      return state;
+  }
+  if (state.status !== 'playing') return state;
   switch (event.type) {
     case 'left':
       return fits(state.playfield, state.active, -1, 0) ? moved(state, -1, 0) : state;
@@ -135,5 +167,5 @@ function update(state, event, random = Math.random) {
   }
 }
 
-const logic = { newGame, update, WIDTH, HEIGHT, TYPES, COLORS };
+const logic = { newGame, startScreen, update, WIDTH, HEIGHT, TYPES, COLORS };
 if (typeof module !== 'undefined') module.exports = logic;
