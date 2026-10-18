@@ -12,6 +12,13 @@ const ctx = canvas.getContext('2d');
 
 let state = startScreen();
 
+// Best score, persisted in localStorage (may be unavailable; guarded in highscore.js).
+function getStorage() {
+  try { return window.localStorage; } catch { return undefined; }
+}
+const storage = getStorage();
+let highScore = loadHighScore(storage);
+
 const OVERLAYS = {
   start: ['Press Enter to start'],
   paused: ['Paused', 'P to resume'],
@@ -39,6 +46,12 @@ function drawCell(x, y, type) {
 }
 
 function renderPanel() {
+  const best = nextHighScore(highScore, state.score);
+  if (best !== highScore) {
+    highScore = best;
+    saveHighScore(storage, highScore);
+  }
+  document.getElementById('highscore').textContent = highScore;
   for (const key of ['score', 'level', 'lines']) {
     document.getElementById(key).textContent = state[key];
   }
