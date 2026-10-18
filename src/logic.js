@@ -18,18 +18,28 @@ const COLORS = {
   L: '#ff9100',
 };
 
-// SHAPES[type][rotation] = four [dx, dy] cells relative to the active
-// tetromino's (x, y). Only the spawn rotation exists so far; the rotation
-// ticket adds the other states here.
-const SHAPES = {
-  I: [[[0, 0], [1, 0], [2, 0], [3, 0]]],
-  O: [[[0, 0], [1, 0], [0, 1], [1, 1]]],
-  T: [[[0, 0], [1, 0], [2, 0], [1, 1]]],
-  S: [[[1, 0], [2, 0], [0, 1], [1, 1]]],
-  Z: [[[0, 0], [1, 0], [1, 1], [2, 1]]],
-  J: [[[0, 0], [1, 0], [2, 0], [2, 1]]],
-  L: [[[0, 0], [1, 0], [2, 0], [0, 1]]],
+// SPAWN[type] = { size, cells }: the spawn orientation as four [dx, dy]
+// cells inside a size x size box anchored at the active tetromino's (x, y).
+const SPAWN = {
+  I: { size: 4, cells: [[0, 1], [1, 1], [2, 1], [3, 1]] },
+  O: { size: 2, cells: [[0, 0], [1, 0], [0, 1], [1, 1]] },
+  T: { size: 3, cells: [[0, 0], [1, 0], [2, 0], [1, 1]] },
+  S: { size: 3, cells: [[1, 0], [2, 0], [0, 1], [1, 1]] },
+  Z: { size: 3, cells: [[0, 0], [1, 0], [1, 1], [2, 1]] },
+  J: { size: 3, cells: [[0, 0], [1, 0], [2, 0], [2, 1]] },
+  L: { size: 3, cells: [[0, 0], [1, 0], [2, 0], [0, 1]] },
 };
+
+// SHAPES[type][rotation]: the four clockwise orientations, each a rotation of
+// the previous one within the box.
+const SHAPES = {};
+for (const type of Object.keys(SPAWN)) {
+  const { size, cells } = SPAWN[type];
+  SHAPES[type] = [cells];
+  for (let r = 1; r < 4; r++) {
+    SHAPES[type].push(SHAPES[type][r - 1].map(([dx, dy]) => [size - 1 - dy, dx]));
+  }
+}
 
 function randomType(random) {
   return TYPES[Math.floor(random() * TYPES.length)];
@@ -65,6 +75,14 @@ function moved(state, dx, dy) {
   return { ...state, active: { ...state.active, x: state.active.x + dx, y: state.active.y + dy } };
 }
 
+// Rotate by `steps` quarter turns clockwise; rejected (state unchanged) if it
+// would collide. No wall kicks.
+function rotated(state, steps) {
+  const rotation = (state.active.rotation + steps) % 4;
+  const active = { ...state.active, rotation, cells: SHAPES[state.active.type][rotation] };
+  return fits(state.playfield, active, 0, 0) ? { ...state, active } : state;
+}
+
 // Settle the active tetromino into the playfield and spawn the next one,
 // drawing a fresh next preview.
 function lock(state, random) {
@@ -88,6 +106,10 @@ function update(state, event, random = Math.random) {
       return fits(state.playfield, state.active, -1, 0) ? moved(state, -1, 0) : state;
     case 'right':
       return fits(state.playfield, state.active, 1, 0) ? moved(state, 1, 0) : state;
+    case 'rotateCW':
+      return rotated(state, 1);
+    case 'rotateCCW':
+      return rotated(state, 3);
     case 'tick':
       return tick(state, random);
     default:
@@ -95,5 +117,5 @@ function update(state, event, random = Math.random) {
   }
 }
 
-const logic = { newGame, update, WIDTH, HEIGHT, TYPES, COLORS };
+const logic = { newGame, update, WIDTH, HEIGHT, TYPES, COLORS, SHAPES };
 if (typeof module !== 'undefined') module.exports = logic;

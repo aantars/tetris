@@ -23,6 +23,18 @@ function render() {
   state.playfield.forEach((row, y) => row.forEach((type, x) => type && drawCell(x, y, type)));
   const { active } = state;
   for (const [dx, dy] of active.cells) drawCell(active.x + dx, active.y + dy, active.type);
+  renderNext();
+}
+
+// Next preview: the upcoming tetromino in its spawn orientation.
+const nextCtx = document.getElementById('next').getContext('2d');
+function renderNext() {
+  nextCtx.fillStyle = '#111';
+  nextCtx.fillRect(0, 0, 120, 120);
+  nextCtx.fillStyle = COLORS[state.next];
+  for (const [dx, dy] of SHAPES[state.next][0]) {
+    nextCtx.fillRect(15 + dx * 24, 15 + dy * 24, 23, 23);
+  }
 }
 
 function send(event) {
@@ -30,7 +42,15 @@ function send(event) {
   render();
 }
 
-const KEYS = { ArrowLeft: 'left', ArrowRight: 'right' };
+const KEYS = {
+  ArrowLeft: 'left',
+  ArrowRight: 'right',
+  ArrowUp: 'rotateCW',
+  x: 'rotateCW',
+  X: 'rotateCW',
+  z: 'rotateCCW',
+  Z: 'rotateCCW',
+};
 
 document.addEventListener('keydown', (e) => {
   const type = KEYS[e.key];
