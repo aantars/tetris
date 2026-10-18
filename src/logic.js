@@ -1,4 +1,4 @@
-// Pure game logic: no DOM, no globals. Public interface:
+﻿// Pure game logic: no DOM, no globals. Public interface:
 //   newGame(random)            -> state
 //   update(state, event, random) -> next state   (never mutates `state`)
 // `random` is an injectable function returning a number in [0, 1).
@@ -48,7 +48,15 @@ function emptyPlayfield() {
 function newGame(random = Math.random) {
   const first = randomType(random);
   const next = randomType(random);
-  return { status: 'playing', playfield: emptyPlayfield(), active: spawn(first), next };
+  return {
+    status: 'playing',
+    playfield: emptyPlayfield(),
+    active: spawn(first),
+    next,
+    score: 0,
+    level: 0,
+    lines: 0,
+  };
 }
 
 // The screen shown on load: a game waiting for `start`.
@@ -70,15 +78,37 @@ function moved(state, dx, dy) {
   return { ...state, active: { ...state.active, x: state.active.x + dx, y: state.active.y + dy } };
 }
 
-// Settle the active tetromino into the playfield and spawn the next one,
-// drawing a fresh next preview.
+const LINE_SCORES = [0, 40, 100, 300, 1200];
+const LINES_PER_LEVEL = 10;
+
+// Remove every full row, letting the rows above drop; returns the new
+// playfield and the number of rows cleared.
+function clearLines(playfield) {
+  const kept = playfield.filter((row) => row.some((cell) => cell === null));
+  const cleared = playfield.length - kept.length;
+  const empty = Array.from({ length: cleared }, () => Array(WIDTH).fill(null));
+  return { playfield: [...empty, ...kept], cleared };
+}
+
+// Settle the active tetromino into the playfield, clear full rows (scoring
+// and levelling up), and spawn the next one, drawing a fresh next preview.
 function lock(state, random) {
   const { active } = state;
   const playfield = state.playfield.map((row) => row.slice());
   for (const [cx, cy] of active.cells) playfield[active.y + cy][active.x + cx] = active.type;
+  const { playfield: settled, cleared } = clearLines(playfield);
+  const lines = state.lines + cleared;
   const spawned = spawn(state.next);
-  const status = fits(playfield, spawned, 0, 0) ? state.status : 'gameover';
-  return { ...state, status, playfield, active: spawned, next: randomType(random) };
+  return {
+    ...state,
+    status: fits(settled, spawned, 0, 0) ? state.status : 'gameover',
+    playfield: settled,
+    active: spawned,
+    next: randomType(random),
+    score: state.score + LINE_SCORES[cleared] * (state.level + 1),
+    lines,
+    level: Math.max(state.level, Math.floor(lines / LINES_PER_LEVEL)),
+  };
 }
 
 // Gravity: fall one row; locks the moment it can fall no further (no lock delay).

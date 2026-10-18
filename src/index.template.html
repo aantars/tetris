@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -8,10 +8,18 @@
   html, body { height: 100%; margin: 0; background: #000; }
   body { display: flex; align-items: center; justify-content: center; }
   canvas { background: #111; max-height: 100vh; }
+  #panel { margin-left: 16px; color: #eee; font: 16px monospace; min-width: 120px; }
+  #panel div { margin-bottom: 12px; }
+  #panel span { display: block; font-size: 24px; }
 </style>
 </head>
 <body>
 <canvas id="playfield"></canvas>
+<div id="panel">
+  <div>SCORE<span id="score">0</span></div>
+  <div>LEVEL<span id="level">0</span></div>
+  <div>LINES<span id="lines">0</span></div>
+</div>
 <script>
 /*{{LOGIC}}*/
 </script>
