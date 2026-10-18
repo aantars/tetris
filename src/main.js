@@ -54,8 +54,16 @@ function render() {
   drawOverlay();
 }
 
+const audio = createAudio();
+
+function renderSound() {
+  document.getElementById('sound').textContent = audio.muted ? 'Muted' : 'On';
+}
+
 function send(event) {
+  const prev = state;
   state = update(state, event);
+  for (const name of soundsFor(prev, state)) audio.play(name);
   render();
 }
 
@@ -65,6 +73,12 @@ const KEYS = { ArrowLeft: 'left', ArrowRight: 'right', Enter: 'start', p: 'pause
 const repeater = createRepeater();
 
 document.addEventListener('keydown', (e) => {
+  audio.unlock(); // audio may only start after a user interaction
+  if (e.key === 'm' || e.key === 'M') {
+    audio.toggleMute();
+    renderSound();
+    return;
+  }
   const type = KEYS[e.key];
   if (!type) return;
   e.preventDefault();
