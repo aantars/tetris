@@ -16,10 +16,12 @@
 </head>
 <body>
 <canvas id="playfield"></canvas>
+<canvas id="next" width="120" height="120" style="align-self:flex-start;margin:16px"></canvas>
 <div id="panel">
   <div>SCORE<span id="score">0</span></div>
   <div>LEVEL<span id="level">0</span></div>
   <div>LINES<span id="lines">0</span></div>
+  <div>HIGH SCORE<span id="highscore">0</span></div>
   <div>SOUND (M)<span id="sound">On</span></div>
 </div>
 <script>
@@ -43,18 +45,28 @@ const COLORS = {
   L: '#ff9100',
 };
 
-// SHAPES[type][rotation] = four [dx, dy] cells relative to the active
-// tetromino's (x, y). Only the spawn rotation exists so far; the rotation
-// ticket adds the other states here.
-const SHAPES = {
-  I: [[[0, 0], [1, 0], [2, 0], [3, 0]]],
-  O: [[[0, 0], [1, 0], [0, 1], [1, 1]]],
-  T: [[[0, 0], [1, 0], [2, 0], [1, 1]]],
-  S: [[[1, 0], [2, 0], [0, 1], [1, 1]]],
-  Z: [[[0, 0], [1, 0], [1, 1], [2, 1]]],
-  J: [[[0, 0], [1, 0], [2, 0], [2, 1]]],
-  L: [[[0, 0], [1, 0], [2, 0], [0, 1]]],
+// SPAWN[type] = { size, cells }: the spawn orientation as four [dx, dy]
+// cells inside a size x size box anchored at the active tetromino's (x, y).
+const SPAWN = {
+  I: { size: 4, cells: [[0, 1], [1, 1], [2, 1], [3, 1]] },
+  O: { size: 2, cells: [[0, 0], [1, 0], [0, 1], [1, 1]] },
+  T: { size: 3, cells: [[0, 0], [1, 0], [2, 0], [1, 1]] },
+  S: { size: 3, cells: [[1, 0], [2, 0], [0, 1], [1, 1]] },
+  Z: { size: 3, cells: [[0, 0], [1, 0], [1, 1], [2, 1]] },
+  J: { size: 3, cells: [[0, 0], [1, 0], [2, 0], [2, 1]] },
+  L: { size: 3, cells: [[0, 0], [1, 0], [2, 0], [0, 1]] },
 };
+
+// SHAPES[type][rotation]: the four clockwise orientations, each a rotation of
+// the previous one within the box.
+const SHAPES = {};
+for (const type of Object.keys(SPAWN)) {
+  const { size, cells } = SPAWN[type];
+  SHAPES[type] = [cells];
+  for (let r = 1; r < 4; r++) {
+    SHAPES[type].push(SHAPES[type][r - 1].map(([dx, dy]) => [size - 1 - dy, dx]));
+  }
+}
 
 function randomType(random) {
   return TYPES[Math.floor(random() * TYPES.length)];
@@ -103,6 +115,24 @@ function moved(state, dx, dy) {
   return { ...state, active: { ...state.active, x: state.active.x + dx, y: state.active.y + dy } };
 }
 
+// Rotate by `steps` quarter turns clockwise; rejected (state unchanged) if it
+// would collide. No wall kicks.
+function rotated(state, steps) {
+  const rotation = (state.active.rotation + steps) % 4;
+  const active = { ...state.active, rotation, cells: SHAPES[state.active.type][rotation] };
+  return fits(state.playfield, active, 0, 0) ? { ...state, active } : state;
+}
+
+// NES gravity: frames per row at 60 fps, indexed by level (0-18); levels
+// 19-28 take 2 frames and 29+ take 1.
+const GRAVITY_FRAMES = [48, 43, 38, 33, 28, 23, 18, 13, 8, 6, 5, 5, 5, 4, 4, 4, 3, 3, 3];
+
+// Milliseconds between gravity ticks at the given level.
+function gravityInterval(level) {
+  const frames = level < GRAVITY_FRAMES.length ? GRAVITY_FRAMES[level] : level < 29 ? 2 : 1;
+  return (frames * 1000) / 60;
+}
+
 const LINE_SCORES = [0, 40, 100, 300, 1200];
 const LINES_PER_LEVEL = 10;
 
@@ -142,9 +172,22 @@ function tick(state, random) {
   return fits(fallen.playfield, fallen.active, 0, 1) ? fallen : lock(fallen, random);
 }
 
-// Events: { type: 'left' | 'right' | 'tick' | 'start' | 'pause' | 'restart' }.
-// status is 'start' | 'playing' | 'paused' | 'gameover'; movement and gravity
-// only act while playing. Later tickets add rotate, soft drop and hard drop.
+// Soft drop: fall one row for 1 point; locks the moment it can fall no further.
+function softDrop(state, random) {
+  if (!fits(state.playfield, state.active, 0, 1)) return state;
+  const fallen = { ...moved(state, 0, 1), score: state.score + 1 };
+  return fits(fallen.playfield, fallen.active, 0, 1) ? fallen : lock(fallen, random);
+}
+
+// Hard drop: fall to the lowest reachable row for 2 points per row, then lock.
+function hardDrop(state, random) {
+  let rows = 0;
+  while (fits(state.playfield, state.active, 0, rows + 1)) rows++;
+  return lock({ ...moved(state, 0, rows), score: state.score + 2 * rows }, random);
+}
+// Events: { type: 'left' | 'right' | 'tick' | 'softDrop' | 'hardDrop' | 'start' | 'pause' | 'restart' }.
+// status is 'start' | 'playing' | 'paused' | 'gameover'; movement, gravity and
+// drops only act while playing. Later tickets add rotate.
 function update(state, event, random = Math.random) {
   switch (event.type) {
     case 'start':
@@ -162,14 +205,22 @@ function update(state, event, random = Math.random) {
       return fits(state.playfield, state.active, -1, 0) ? moved(state, -1, 0) : state;
     case 'right':
       return fits(state.playfield, state.active, 1, 0) ? moved(state, 1, 0) : state;
+    case 'rotateCW':
+      return rotated(state, 1);
+    case 'rotateCCW':
+      return rotated(state, 3);
     case 'tick':
       return tick(state, random);
+    case 'softDrop':
+      return softDrop(state, random);
+    case 'hardDrop':
+      return hardDrop(state, random);
     default:
       return state;
   }
 }
 
-const logic = { newGame, startScreen, update, WIDTH, HEIGHT, TYPES, COLORS };
+const logic = { newGame, startScreen, update, gravityInterval, WIDTH, HEIGHT, TYPES, COLORS, SHAPES };
 if (typeof module !== 'undefined') module.exports = logic;
 
 </script>
@@ -216,6 +267,39 @@ function createRepeater({ delay = DAS_DELAY_MS, interval = DAS_INTERVAL_MS } = {
 
 const repeat = { createRepeater, DAS_DELAY_MS, DAS_INTERVAL_MS };
 if (typeof module !== 'undefined') module.exports = repeat;
+
+</script>
+<script>
+// High score decision and persistence. No DOM: callers pass in a storage
+// object (localStorage in the browser); any storage failure is swallowed so
+// the game works without it. Holds no game rules.
+
+const HIGH_SCORE_KEY = 'tetris.highScore';
+
+// The high score after a game reaches `score`.
+function nextHighScore(high, score) {
+  return score > high ? score : high;
+}
+
+function loadHighScore(storage) {
+  try {
+    const n = Number.parseInt(storage.getItem(HIGH_SCORE_KEY), 10);
+    return n > 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function saveHighScore(storage, value) {
+  try {
+    storage.setItem(HIGH_SCORE_KEY, String(value));
+  } catch {
+    // storage unavailable or full: keep playing without persistence
+  }
+}
+
+const highscore = { nextHighScore, loadHighScore, saveHighScore, HIGH_SCORE_KEY };
+if (typeof module !== 'undefined') module.exports = highscore;
 
 </script>
 <script>
@@ -320,7 +404,6 @@ if (typeof module !== 'undefined') module.exports = audioModule;
 // (newGame, update, WIDTH, HEIGHT, COLORS) and repeat.js (createRepeater).
 
 const CELL = 30;
-const GRAVITY_MS = 800; // constant for now; the gravity ticket adds the level table
 
 const canvas = document.getElementById('playfield');
 canvas.width = WIDTH * CELL;
@@ -328,6 +411,13 @@ canvas.height = HEIGHT * CELL;
 const ctx = canvas.getContext('2d');
 
 let state = startScreen();
+
+// Best score, persisted in localStorage (may be unavailable; guarded in highscore.js).
+function getStorage() {
+  try { return window.localStorage; } catch { return undefined; }
+}
+const storage = getStorage();
+let highScore = loadHighScore(storage);
 
 const OVERLAYS = {
   start: ['Press Enter to start'],
@@ -356,6 +446,12 @@ function drawCell(x, y, type) {
 }
 
 function renderPanel() {
+  const best = nextHighScore(highScore, state.score);
+  if (best !== highScore) {
+    highScore = best;
+    saveHighScore(storage, highScore);
+  }
+  document.getElementById('highscore').textContent = highScore;
   for (const key of ['score', 'level', 'lines']) {
     document.getElementById(key).textContent = state[key];
   }
@@ -369,6 +465,18 @@ function render() {
   const { active } = state;
   for (const [dx, dy] of active.cells) drawCell(active.x + dx, active.y + dy, active.type);
   drawOverlay();
+  renderNext();
+}
+
+// Next preview: the upcoming tetromino in its spawn orientation.
+const nextCtx = document.getElementById('next').getContext('2d');
+function renderNext() {
+  nextCtx.fillStyle = '#111';
+  nextCtx.fillRect(0, 0, 120, 120);
+  nextCtx.fillStyle = COLORS[state.next];
+  for (const [dx, dy] of SHAPES[state.next][0]) {
+    nextCtx.fillRect(15 + dx * 24, 15 + dy * 24, 23, 23);
+  }
 }
 
 const audio = createAudio();
@@ -384,7 +492,20 @@ function send(event) {
   render();
 }
 
-const KEYS = { ArrowLeft: 'left', ArrowRight: 'right', Enter: 'start', p: 'pause', P: 'pause', r: 'restart', R: 'restart' };
+const KEYS = {
+  ArrowLeft: 'left',
+  ArrowRight: 'right',
+  ArrowUp: 'rotateCW',
+  x: 'rotateCW',
+  X: 'rotateCW',
+  z: 'rotateCCW',
+  Z: 'rotateCCW',
+  Enter: 'start',
+  p: 'pause',
+  P: 'pause',
+  r: 'restart',
+  R: 'restart',
+};
 
 // Left/Right auto-repeat (DAS); timing values live in src/repeat.js.
 const repeater = createRepeater();
@@ -415,7 +536,47 @@ setInterval(() => {
   for (const move of repeater.poll(performance.now())) send({ type: move });
 }, 10);
 
-setInterval(() => send({ type: 'tick' }), GRAVITY_MS);
+// Gravity: re-read the interval for the current level on every check, so a
+// level-up changes the fall speed immediately.
+let lastFall = performance.now();
+setInterval(() => {
+  const now = performance.now();
+  for (let n = 0; n < 5 && now - lastFall >= gravityInterval(state.level); n++) {
+    lastFall += gravityInterval(state.level);
+    send({ type: 'tick' });
+  }
+  if (now - lastFall >= gravityInterval(state.level)) lastFall = now;
+}, 5);
+
+// Soft drop: Down held falls one cell per interval, starting immediately
+// (no DAS delay, so it does not use the repeater).
+const SOFT_DROP_MS = 50;
+let softDropTimer = null;
+
+function stopSoftDrop() {
+  clearInterval(softDropTimer);
+  softDropTimer = null;
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (softDropTimer === null) {
+      send({ type: 'softDrop' });
+      softDropTimer = setInterval(() => send({ type: 'softDrop' }), SOFT_DROP_MS);
+    }
+  } else if (e.key === ' ') {
+    e.preventDefault();
+    if (!e.repeat) send({ type: 'hardDrop' });
+  }
+});
+
+document.addEventListener('keyup', (e) => {
+  if (e.key === 'ArrowDown') stopSoftDrop();
+});
+
+window.addEventListener('blur', stopSoftDrop);
+
 render();
 
 </script>

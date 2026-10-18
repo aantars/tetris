@@ -18,18 +18,28 @@ const COLORS = {
   L: '#ff9100',
 };
 
-// SHAPES[type][rotation] = four [dx, dy] cells relative to the active
-// tetromino's (x, y). Only the spawn rotation exists so far; the rotation
-// ticket adds the other states here.
-const SHAPES = {
-  I: [[[0, 0], [1, 0], [2, 0], [3, 0]]],
-  O: [[[0, 0], [1, 0], [0, 1], [1, 1]]],
-  T: [[[0, 0], [1, 0], [2, 0], [1, 1]]],
-  S: [[[1, 0], [2, 0], [0, 1], [1, 1]]],
-  Z: [[[0, 0], [1, 0], [1, 1], [2, 1]]],
-  J: [[[0, 0], [1, 0], [2, 0], [2, 1]]],
-  L: [[[0, 0], [1, 0], [2, 0], [0, 1]]],
+// SPAWN[type] = { size, cells }: the spawn orientation as four [dx, dy]
+// cells inside a size x size box anchored at the active tetromino's (x, y).
+const SPAWN = {
+  I: { size: 4, cells: [[0, 1], [1, 1], [2, 1], [3, 1]] },
+  O: { size: 2, cells: [[0, 0], [1, 0], [0, 1], [1, 1]] },
+  T: { size: 3, cells: [[0, 0], [1, 0], [2, 0], [1, 1]] },
+  S: { size: 3, cells: [[1, 0], [2, 0], [0, 1], [1, 1]] },
+  Z: { size: 3, cells: [[0, 0], [1, 0], [1, 1], [2, 1]] },
+  J: { size: 3, cells: [[0, 0], [1, 0], [2, 0], [2, 1]] },
+  L: { size: 3, cells: [[0, 0], [1, 0], [2, 0], [0, 1]] },
 };
+
+// SHAPES[type][rotation]: the four clockwise orientations, each a rotation of
+// the previous one within the box.
+const SHAPES = {};
+for (const type of Object.keys(SPAWN)) {
+  const { size, cells } = SPAWN[type];
+  SHAPES[type] = [cells];
+  for (let r = 1; r < 4; r++) {
+    SHAPES[type].push(SHAPES[type][r - 1].map(([dx, dy]) => [size - 1 - dy, dx]));
+  }
+}
 
 function randomType(random) {
   return TYPES[Math.floor(random() * TYPES.length)];
@@ -78,6 +88,24 @@ function moved(state, dx, dy) {
   return { ...state, active: { ...state.active, x: state.active.x + dx, y: state.active.y + dy } };
 }
 
+// Rotate by `steps` quarter turns clockwise; rejected (state unchanged) if it
+// would collide. No wall kicks.
+function rotated(state, steps) {
+  const rotation = (state.active.rotation + steps) % 4;
+  const active = { ...state.active, rotation, cells: SHAPES[state.active.type][rotation] };
+  return fits(state.playfield, active, 0, 0) ? { ...state, active } : state;
+}
+
+// NES gravity: frames per row at 60 fps, indexed by level (0-18); levels
+// 19-28 take 2 frames and 29+ take 1.
+const GRAVITY_FRAMES = [48, 43, 38, 33, 28, 23, 18, 13, 8, 6, 5, 5, 5, 4, 4, 4, 3, 3, 3];
+
+// Milliseconds between gravity ticks at the given level.
+function gravityInterval(level) {
+  const frames = level < GRAVITY_FRAMES.length ? GRAVITY_FRAMES[level] : level < 29 ? 2 : 1;
+  return (frames * 1000) / 60;
+}
+
 const LINE_SCORES = [0, 40, 100, 300, 1200];
 const LINES_PER_LEVEL = 10;
 
@@ -117,9 +145,22 @@ function tick(state, random) {
   return fits(fallen.playfield, fallen.active, 0, 1) ? fallen : lock(fallen, random);
 }
 
-// Events: { type: 'left' | 'right' | 'tick' | 'start' | 'pause' | 'restart' }.
-// status is 'start' | 'playing' | 'paused' | 'gameover'; movement and gravity
-// only act while playing. Later tickets add rotate, soft drop and hard drop.
+// Soft drop: fall one row for 1 point; locks the moment it can fall no further.
+function softDrop(state, random) {
+  if (!fits(state.playfield, state.active, 0, 1)) return state;
+  const fallen = { ...moved(state, 0, 1), score: state.score + 1 };
+  return fits(fallen.playfield, fallen.active, 0, 1) ? fallen : lock(fallen, random);
+}
+
+// Hard drop: fall to the lowest reachable row for 2 points per row, then lock.
+function hardDrop(state, random) {
+  let rows = 0;
+  while (fits(state.playfield, state.active, 0, rows + 1)) rows++;
+  return lock({ ...moved(state, 0, rows), score: state.score + 2 * rows }, random);
+}
+// Events: { type: 'left' | 'right' | 'tick' | 'softDrop' | 'hardDrop' | 'start' | 'pause' | 'restart' }.
+// status is 'start' | 'playing' | 'paused' | 'gameover'; movement, gravity and
+// drops only act while playing. Later tickets add rotate.
 function update(state, event, random = Math.random) {
   switch (event.type) {
     case 'start':
@@ -137,12 +178,20 @@ function update(state, event, random = Math.random) {
       return fits(state.playfield, state.active, -1, 0) ? moved(state, -1, 0) : state;
     case 'right':
       return fits(state.playfield, state.active, 1, 0) ? moved(state, 1, 0) : state;
+    case 'rotateCW':
+      return rotated(state, 1);
+    case 'rotateCCW':
+      return rotated(state, 3);
     case 'tick':
       return tick(state, random);
+    case 'softDrop':
+      return softDrop(state, random);
+    case 'hardDrop':
+      return hardDrop(state, random);
     default:
       return state;
   }
 }
 
-const logic = { newGame, startScreen, update, WIDTH, HEIGHT, TYPES, COLORS };
+const logic = { newGame, startScreen, update, gravityInterval, WIDTH, HEIGHT, TYPES, COLORS, SHAPES };
 if (typeof module !== 'undefined') module.exports = logic;

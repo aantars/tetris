@@ -3,7 +3,6 @@
 // (newGame, update, WIDTH, HEIGHT, COLORS) and repeat.js (createRepeater).
 
 const CELL = 30;
-const GRAVITY_MS = 800; // constant for now; the gravity ticket adds the level table
 
 const canvas = document.getElementById('playfield');
 canvas.width = WIDTH * CELL;
@@ -11,6 +10,13 @@ canvas.height = HEIGHT * CELL;
 const ctx = canvas.getContext('2d');
 
 let state = startScreen();
+
+// Best score, persisted in localStorage (may be unavailable; guarded in highscore.js).
+function getStorage() {
+  try { return window.localStorage; } catch { return undefined; }
+}
+const storage = getStorage();
+let highScore = loadHighScore(storage);
 
 const OVERLAYS = {
   start: ['Press Enter to start'],
@@ -39,6 +45,12 @@ function drawCell(x, y, type) {
 }
 
 function renderPanel() {
+  const best = nextHighScore(highScore, state.score);
+  if (best !== highScore) {
+    highScore = best;
+    saveHighScore(storage, highScore);
+  }
+  document.getElementById('highscore').textContent = highScore;
   for (const key of ['score', 'level', 'lines']) {
     document.getElementById(key).textContent = state[key];
   }
@@ -52,6 +64,18 @@ function render() {
   const { active } = state;
   for (const [dx, dy] of active.cells) drawCell(active.x + dx, active.y + dy, active.type);
   drawOverlay();
+  renderNext();
+}
+
+// Next preview: the upcoming tetromino in its spawn orientation.
+const nextCtx = document.getElementById('next').getContext('2d');
+function renderNext() {
+  nextCtx.fillStyle = '#111';
+  nextCtx.fillRect(0, 0, 120, 120);
+  nextCtx.fillStyle = COLORS[state.next];
+  for (const [dx, dy] of SHAPES[state.next][0]) {
+    nextCtx.fillRect(15 + dx * 24, 15 + dy * 24, 23, 23);
+  }
 }
 
 const audio = createAudio();
@@ -67,7 +91,20 @@ function send(event) {
   render();
 }
 
-const KEYS = { ArrowLeft: 'left', ArrowRight: 'right', Enter: 'start', p: 'pause', P: 'pause', r: 'restart', R: 'restart' };
+const KEYS = {
+  ArrowLeft: 'left',
+  ArrowRight: 'right',
+  ArrowUp: 'rotateCW',
+  x: 'rotateCW',
+  X: 'rotateCW',
+  z: 'rotateCCW',
+  Z: 'rotateCCW',
+  Enter: 'start',
+  p: 'pause',
+  P: 'pause',
+  r: 'restart',
+  R: 'restart',
+};
 
 // Left/Right auto-repeat (DAS); timing values live in src/repeat.js.
 const repeater = createRepeater();
@@ -98,5 +135,45 @@ setInterval(() => {
   for (const move of repeater.poll(performance.now())) send({ type: move });
 }, 10);
 
-setInterval(() => send({ type: 'tick' }), GRAVITY_MS);
+// Gravity: re-read the interval for the current level on every check, so a
+// level-up changes the fall speed immediately.
+let lastFall = performance.now();
+setInterval(() => {
+  const now = performance.now();
+  for (let n = 0; n < 5 && now - lastFall >= gravityInterval(state.level); n++) {
+    lastFall += gravityInterval(state.level);
+    send({ type: 'tick' });
+  }
+  if (now - lastFall >= gravityInterval(state.level)) lastFall = now;
+}, 5);
+
+// Soft drop: Down held falls one cell per interval, starting immediately
+// (no DAS delay, so it does not use the repeater).
+const SOFT_DROP_MS = 50;
+let softDropTimer = null;
+
+function stopSoftDrop() {
+  clearInterval(softDropTimer);
+  softDropTimer = null;
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (softDropTimer === null) {
+      send({ type: 'softDrop' });
+      softDropTimer = setInterval(() => send({ type: 'softDrop' }), SOFT_DROP_MS);
+    }
+  } else if (e.key === ' ') {
+    e.preventDefault();
+    if (!e.repeat) send({ type: 'hardDrop' });
+  }
+});
+
+document.addEventListener('keyup', (e) => {
+  if (e.key === 'ArrowDown') stopSoftDrop();
+});
+
+window.addEventListener('blur', stopSoftDrop);
+
 render();
