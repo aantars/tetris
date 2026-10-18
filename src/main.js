@@ -119,4 +119,34 @@ setInterval(() => {
   }
   if (now - lastFall >= gravityInterval(state.level)) lastFall = now;
 }, 5);
+
+// Soft drop: Down held falls one cell per interval, starting immediately
+// (no DAS delay, so it does not use the repeater).
+const SOFT_DROP_MS = 50;
+let softDropTimer = null;
+
+function stopSoftDrop() {
+  clearInterval(softDropTimer);
+  softDropTimer = null;
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (softDropTimer === null) {
+      send({ type: 'softDrop' });
+      softDropTimer = setInterval(() => send({ type: 'softDrop' }), SOFT_DROP_MS);
+    }
+  } else if (e.key === ' ') {
+    e.preventDefault();
+    if (!e.repeat) send({ type: 'hardDrop' });
+  }
+});
+
+document.addEventListener('keyup', (e) => {
+  if (e.key === 'ArrowDown') stopSoftDrop();
+});
+
+window.addEventListener('blur', stopSoftDrop);
+
 render();
