@@ -102,6 +102,7 @@ function send(event) {
     lastFall = performance.now();
   }
   for (const name of soundsFor(prev, state)) audio.play(name);
+  audio.setMusic(state.status === 'playing');
   render();
 }
 
