@@ -9,7 +9,28 @@ canvas.width = WIDTH * CELL;
 canvas.height = HEIGHT * CELL;
 const ctx = canvas.getContext('2d');
 
-let state = newGame();
+let state = startScreen();
+
+const OVERLAYS = {
+  start: ['Press Enter to start'],
+  paused: ['Paused', 'P to resume'],
+  gameover: ['Game over', 'Press Enter to restart'],
+};
+
+function drawOverlay() {
+  const lines = OVERLAYS[state.status];
+  if (!lines) return;
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 28px sans-serif';
+  ctx.fillText(lines[0], canvas.width / 2, canvas.height / 2);
+  if (lines[1]) {
+    ctx.font = '18px sans-serif';
+    ctx.fillText(lines[1], canvas.width / 2, canvas.height / 2 + 32);
+  }
+}
 
 function drawCell(x, y, type) {
   ctx.fillStyle = COLORS[type];
@@ -29,6 +50,7 @@ function render() {
   state.playfield.forEach((row, y) => row.forEach((type, x) => type && drawCell(x, y, type)));
   const { active } = state;
   for (const [dx, dy] of active.cells) drawCell(active.x + dx, active.y + dy, active.type);
+  drawOverlay();
 }
 
 function send(event) {
@@ -36,7 +58,7 @@ function send(event) {
   render();
 }
 
-const KEYS = { ArrowLeft: 'left', ArrowRight: 'right' };
+const KEYS = { ArrowLeft: 'left', ArrowRight: 'right', Enter: 'start', p: 'pause', P: 'pause', r: 'restart', R: 'restart' };
 
 // Left/Right auto-repeat (DAS); timing values live in src/repeat.js.
 const repeater = createRepeater();
