@@ -167,3 +167,50 @@ test('the level rises every 10 cleared lines', () => {
 test('the score is scored at the level before the clear raises it', () => {
   assert.strictEqual(tickOnce(oAboutToLock([0], { lines: 9 })).score, 40);
 });
+
+test('soft drop moves the active tetromino down one cell and scores 1 point', () => {
+  const state = newGame(fixed(pick(2)));
+  const after = update(state, { type: 'softDrop' }, fixed(pick(2)));
+  assert.strictEqual(after.active.y, state.active.y + 1);
+  assert.strictEqual(after.score, 1);
+});
+
+test('soft drop onto the floor scores the cell and locks at once', () => {
+  const setup = oAboutToLock([]);
+  setup.state.active.y = HEIGHT - 3; // two rows above the floor
+  const after = update(setup.state, { type: 'softDrop' }, setup.random);
+  assert.strictEqual(after.score, 1);
+  assert.strictEqual(filledCount(after), 4);
+  assert.strictEqual(after.active.type, 'T');
+});
+
+test('hard drop locks at the lowest position and scores 2 points per cell dropped', () => {
+  const random = fixed(pick(1), pick(2), pick(3));
+  const state = newGame(random); // O at y 0
+  const after = update(state, { type: 'hardDrop' }, random);
+  const settled = [];
+  after.playfield.forEach((row, y) => row.forEach((c, x) => c && settled.push([x, y])));
+  assert.strictEqual(settled.length, 4);
+  assert.ok(settled.every(([, y]) => y >= HEIGHT - 2));
+  assert.strictEqual(after.score, 2 * (HEIGHT - 2));
+  assert.strictEqual(after.active.type, 'T');
+  assert.strictEqual(after.active.y, 0);
+});
+
+test('hard drop stops on settled blocks', () => {
+  const random = fixed(pick(1), pick(2), pick(3));
+  const state = newGame(random);
+  const playfield = state.playfield.map((row) => row.slice());
+  playfield[HEIGHT - 1][state.active.x] = 'I';
+  const after = update({ ...state, playfield }, { type: 'hardDrop' }, random);
+  assert.strictEqual(after.playfield[HEIGHT - 2][state.active.x], 'O');
+  assert.strictEqual(after.playfield[HEIGHT - 3][state.active.x], 'O');
+  assert.strictEqual(after.score, 2 * (HEIGHT - 3));
+});
+
+test('hard drop of a tetromino already resting scores nothing but still locks', () => {
+  const setup = oAboutToLock([]);
+  const after = update(setup.state, { type: 'hardDrop' }, setup.random);
+  assert.strictEqual(after.score, 0);
+  assert.strictEqual(filledCount(after), 4);
+});

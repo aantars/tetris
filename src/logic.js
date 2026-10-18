@@ -102,8 +102,22 @@ function tick(state, random) {
   return fits(fallen.playfield, fallen.active, 0, 1) ? fallen : lock(fallen, random);
 }
 
-// Events: { type: 'left' | 'right' | 'tick' }. Later tickets add rotate,
-// soft drop, hard drop, start, restart and pause as further cases.
+// Soft drop: fall one row for 1 point; locks the moment it can fall no further.
+function softDrop(state, random) {
+  if (!fits(state.playfield, state.active, 0, 1)) return state;
+  const fallen = { ...moved(state, 0, 1), score: state.score + 1 };
+  return fits(fallen.playfield, fallen.active, 0, 1) ? fallen : lock(fallen, random);
+}
+
+// Hard drop: fall to the lowest reachable row for 2 points per row, then lock.
+function hardDrop(state, random) {
+  let rows = 0;
+  while (fits(state.playfield, state.active, 0, rows + 1)) rows++;
+  return lock({ ...moved(state, 0, rows), score: state.score + 2 * rows }, random);
+}
+
+// Events: { type: 'left' | 'right' | 'tick' | 'softDrop' | 'hardDrop' }. Later
+// tickets add rotate, start, restart and pause as further cases.
 function update(state, event, random = Math.random) {
   switch (event.type) {
     case 'left':
@@ -112,6 +126,10 @@ function update(state, event, random = Math.random) {
       return fits(state.playfield, state.active, 1, 0) ? moved(state, 1, 0) : state;
     case 'tick':
       return tick(state, random);
+    case 'softDrop':
+      return softDrop(state, random);
+    case 'hardDrop':
+      return hardDrop(state, random);
     default:
       return state;
   }
