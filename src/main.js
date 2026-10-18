@@ -3,7 +3,6 @@
 // (newGame, update, WIDTH, HEIGHT, COLORS) and repeat.js (createRepeater).
 
 const CELL = 30;
-const GRAVITY_MS = 800; // constant for now; the gravity ticket adds the level table
 
 const canvas = document.getElementById('playfield');
 canvas.width = WIDTH * CELL;
@@ -65,6 +64,18 @@ function render() {
   const { active } = state;
   for (const [dx, dy] of active.cells) drawCell(active.x + dx, active.y + dy, active.type);
   drawOverlay();
+  renderNext();
+}
+
+// Next preview: the upcoming tetromino in its spawn orientation.
+const nextCtx = document.getElementById('next').getContext('2d');
+function renderNext() {
+  nextCtx.fillStyle = '#111';
+  nextCtx.fillRect(0, 0, 120, 120);
+  nextCtx.fillStyle = COLORS[state.next];
+  for (const [dx, dy] of SHAPES[state.next][0]) {
+    nextCtx.fillRect(15 + dx * 24, 15 + dy * 24, 23, 23);
+  }
 }
 
 function send(event) {
@@ -72,7 +83,20 @@ function send(event) {
   render();
 }
 
-const KEYS = { ArrowLeft: 'left', ArrowRight: 'right', Enter: 'start', p: 'pause', P: 'pause', r: 'restart', R: 'restart' };
+const KEYS = {
+  ArrowLeft: 'left',
+  ArrowRight: 'right',
+  ArrowUp: 'rotateCW',
+  x: 'rotateCW',
+  X: 'rotateCW',
+  z: 'rotateCCW',
+  Z: 'rotateCCW',
+  Enter: 'start',
+  p: 'pause',
+  P: 'pause',
+  r: 'restart',
+  R: 'restart',
+};
 
 // Left/Right auto-repeat (DAS); timing values live in src/repeat.js.
 const repeater = createRepeater();
@@ -97,5 +121,15 @@ setInterval(() => {
   for (const move of repeater.poll(performance.now())) send({ type: move });
 }, 10);
 
-setInterval(() => send({ type: 'tick' }), GRAVITY_MS);
+// Gravity: re-read the interval for the current level on every check, so a
+// level-up changes the fall speed immediately.
+let lastFall = performance.now();
+setInterval(() => {
+  const now = performance.now();
+  for (let n = 0; n < 5 && now - lastFall >= gravityInterval(state.level); n++) {
+    lastFall += gravityInterval(state.level);
+    send({ type: 'tick' });
+  }
+  if (now - lastFall >= gravityInterval(state.level)) lastFall = now;
+}, 5);
 render();
