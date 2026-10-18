@@ -1,6 +1,6 @@
 ﻿const test = require('node:test');
 const assert = require('node:assert');
-const { newGame, update, WIDTH, HEIGHT, TYPES } = require('../src/logic.js');
+const { newGame, update, gravityInterval, WIDTH, HEIGHT, TYPES } = require('../src/logic.js');
 
 // A fixed random source: yields the given values in order, then repeats the last.
 function fixed(...values) {
@@ -255,4 +255,19 @@ test('the level rises every 10 cleared lines', () => {
 
 test('the score is scored at the level before the clear raises it', () => {
   assert.strictEqual(tickOnce(oAboutToLock([0], { lines: 9 })).score, 40);
+});
+
+test('gravity interval follows the NES frame table at 60 fps, in ms', () => {
+  const frames = { 0: 48, 1: 43, 2: 38, 3: 33, 4: 28, 5: 23, 6: 18, 7: 13, 8: 8, 9: 6, 10: 5, 12: 5, 13: 4, 15: 4, 16: 3, 18: 3, 19: 2, 28: 2, 29: 1 };
+  for (const [level, f] of Object.entries(frames)) {
+    assert.ok(Math.abs(gravityInterval(Number(level)) - (f * 1000) / 60) < 1e-9, `level ${level}`);
+  }
+  assert.strictEqual(gravityInterval(0), 800);
+  assert.strictEqual(gravityInterval(9), 100);
+});
+
+test('gravity interval is capped at level 29', () => {
+  assert.strictEqual(gravityInterval(30), gravityInterval(29));
+  assert.strictEqual(gravityInterval(1000), gravityInterval(29));
+  assert.ok(Math.abs(gravityInterval(29) - 1000 / 60) < 1e-9);
 });

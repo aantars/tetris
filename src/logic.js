@@ -96,6 +96,16 @@ function rotated(state, steps) {
   return fits(state.playfield, active, 0, 0) ? { ...state, active } : state;
 }
 
+// NES gravity: frames per row at 60 fps, indexed by level (0-18); levels
+// 19-28 take 2 frames and 29+ take 1.
+const GRAVITY_FRAMES = [48, 43, 38, 33, 28, 23, 18, 13, 8, 6, 5, 5, 5, 4, 4, 4, 3, 3, 3];
+
+// Milliseconds between gravity ticks at the given level.
+function gravityInterval(level) {
+  const frames = level < GRAVITY_FRAMES.length ? GRAVITY_FRAMES[level] : level < 29 ? 2 : 1;
+  return (frames * 1000) / 60;
+}
+
 const LINE_SCORES = [0, 40, 100, 300, 1200];
 const LINES_PER_LEVEL = 10;
 
@@ -166,5 +176,5 @@ function update(state, event, random = Math.random) {
   }
 }
 
-const logic = { newGame, startScreen, update, WIDTH, HEIGHT, TYPES, COLORS, SHAPES };
+const logic = { newGame, startScreen, update, gravityInterval, WIDTH, HEIGHT, TYPES, COLORS, SHAPES };
 if (typeof module !== 'undefined') module.exports = logic;
