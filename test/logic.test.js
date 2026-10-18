@@ -92,3 +92,92 @@ test('update does not mutate the previous state', () => {
   update(state, { type: 'tick' }, fixed(pick(2)));
   assert.strictEqual(state.active.y, y);
 });
+
+// --- Game flow ---
+
+const { startScreen } = require('../src/logic.js');
+
+test('the game opens on the start screen and ignores movement and gravity until started', () => {
+  const state = startScreen(fixed(pick(2)));
+  assert.strictEqual(state.status, 'start');
+  for (const type of ['left', 'right', 'tick']) {
+    assert.deepStrictEqual(update(state, { type }, fixed(pick(2))), state);
+  }
+});
+
+test('start begins a game, and a new game is playing', () => {
+  assert.strictEqual(newGame(fixed(pick(2))).status, 'playing');
+  const state = update(startScreen(), { type: 'start' }, fixed(pick(1), pick(2)));
+  assert.strictEqual(state.status, 'playing');
+  assert.strictEqual(state.active.type, 'O');
+});
+
+test('start does nothing while playing or paused', () => {
+  const playing = newGame(fixed(pick(2)));
+  assert.strictEqual(update(playing, { type: 'start' }, fixed(pick(0))), playing);
+  const paused = update(playing, { type: 'pause' });
+  assert.strictEqual(update(paused, { type: 'start' }, fixed(pick(0))), paused);
+});
+
+test('pause toggles, and nothing moves or falls while paused', () => {
+  const state = newGame(fixed(pick(2)));
+  const paused = update(state, { type: 'pause' });
+  assert.strictEqual(paused.status, 'paused');
+  for (const type of ['left', 'right', 'tick']) {
+    assert.deepStrictEqual(update(paused, { type }, fixed(pick(2))), paused);
+  }
+  const resumed = update(paused, { type: 'pause' });
+  assert.strictEqual(resumed.status, 'playing');
+  assert.deepStrictEqual(resumed.active, state.active);
+  assert.strictEqual(update(resumed, { type: 'tick' }, fixed(pick(2))).active.y, state.active.y + 1);
+});
+
+test('pause is ignored on the start and game over screens', () => {
+  const start = startScreen();
+  assert.strictEqual(update(start, { type: 'pause' }), start);
+});
+
+test('restart begins a fresh game from any status', () => {
+  const random = fixed(pick(1), pick(2));
+  let state = newGame(random);
+  state = update(update(state, { type: 'tick' }, random), { type: 'left' });
+  for (const from of [state, update(state, { type: 'pause' }), startScreen()]) {
+    const fresh = update(from, { type: 'restart' }, fixed(pick(3), pick(4)));
+    assert.strictEqual(fresh.status, 'playing');
+    assert.strictEqual(fresh.active.type, TYPES[3]);
+    assert.strictEqual(fresh.active.y, 0);
+    assert.strictEqual(fresh.next, TYPES[4]);
+  }
+});
+
+function stackedToSpawn() {
+  // Fill every row except one column, up to the spawn rows, so the next spawn overlaps.
+  const state = newGame(fixed(pick(1)));
+  const playfield = state.playfield.map((row, y) => (y < 3 ? row.map(() => 'I') : row));
+  return { ...state, playfield, active: { ...state.active, y: 5 } };
+}
+
+test('game over occurs when a new tetromino cannot spawn', () => {
+  const random = fixed(pick(1));
+  const state = stackedToSpawn();
+  // Settled blocks beneath the active tetromino make it lock; the next spawn overlaps the stack.
+  const playfield = state.playfield.map((row) => row.slice());
+  playfield[7] = playfield[7].map(() => 'I');
+  playfield[8] = playfield[8].map(() => 'I');
+  const over = update({ ...state, playfield }, { type: 'tick' }, random);
+  assert.strictEqual(over.status, 'gameover');
+});
+
+test('game over ignores movement and gravity, and start begins a new game', () => {
+  const random = fixed(pick(1));
+  const state = stackedToSpawn();
+  const playfield = state.playfield.map((row, y) => (y === 7 ? row.map(() => 'I') : row));
+  const over = update({ ...state, playfield }, { type: 'tick' }, random);
+  assert.strictEqual(over.status, 'gameover');
+  for (const type of ['left', 'right', 'tick', 'pause']) {
+    assert.deepStrictEqual(update(over, { type }, random), over);
+  }
+  const again = update(over, { type: 'start' }, fixed(pick(3), pick(4)));
+  assert.strictEqual(again.status, 'playing');
+  assert.ok(again.playfield.every((row) => row.every((c) => c === null)));
+});

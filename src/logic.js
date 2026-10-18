@@ -48,7 +48,12 @@ function emptyPlayfield() {
 function newGame(random = Math.random) {
   const first = randomType(random);
   const next = randomType(random);
-  return { playfield: emptyPlayfield(), active: spawn(first), next };
+  return { status: 'playing', playfield: emptyPlayfield(), active: spawn(first), next };
+}
+
+// The screen shown on load: a game waiting for `start`.
+function startScreen(random = Math.random) {
+  return { ...newGame(random), status: 'start' };
 }
 
 // True if the active tetromino, shifted by (dx, dy), stays inside the
@@ -71,7 +76,9 @@ function lock(state, random) {
   const { active } = state;
   const playfield = state.playfield.map((row) => row.slice());
   for (const [cx, cy] of active.cells) playfield[active.y + cy][active.x + cx] = active.type;
-  return { ...state, playfield, active: spawn(state.next), next: randomType(random) };
+  const spawned = spawn(state.next);
+  const status = fits(playfield, spawned, 0, 0) ? state.status : 'gameover';
+  return { ...state, status, playfield, active: spawned, next: randomType(random) };
 }
 
 // Gravity: fall one row; locks the moment it can fall no further (no lock delay).
@@ -80,9 +87,21 @@ function tick(state, random) {
   return fits(fallen.playfield, fallen.active, 0, 1) ? fallen : lock(fallen, random);
 }
 
-// Events: { type: 'left' | 'right' | 'tick' }. Later tickets add rotate,
-// soft drop, hard drop, start, restart and pause as further cases.
+// Events: { type: 'left' | 'right' | 'tick' | 'start' | 'pause' | 'restart' }.
+// status is 'start' | 'playing' | 'paused' | 'gameover'; movement and gravity
+// only act while playing. Later tickets add rotate, soft drop and hard drop.
 function update(state, event, random = Math.random) {
+  switch (event.type) {
+    case 'start':
+      return state.status === 'start' || state.status === 'gameover' ? newGame(random) : state;
+    case 'restart':
+      return newGame(random);
+    case 'pause':
+      if (state.status === 'playing') return { ...state, status: 'paused' };
+      if (state.status === 'paused') return { ...state, status: 'playing' };
+      return state;
+  }
+  if (state.status !== 'playing') return state;
   switch (event.type) {
     case 'left':
       return fits(state.playfield, state.active, -1, 0) ? moved(state, -1, 0) : state;
@@ -95,5 +114,5 @@ function update(state, event, random = Math.random) {
   }
 }
 
-const logic = { newGame, update, WIDTH, HEIGHT, TYPES, COLORS };
+const logic = { newGame, startScreen, update, WIDTH, HEIGHT, TYPES, COLORS };
 if (typeof module !== 'undefined') module.exports = logic;
