@@ -33,11 +33,13 @@ function createAudio(AudioContextClass = typeof window !== 'undefined' ? window.
       context();
     },
     play(name) {
+      const notes = SOUNDS[name];
+      if (!notes) throw new Error(`Unknown sound: ${name}`);
       if (muted) return;
       try {
         const c = context();
         if (!c) return;
-        for (const [freq, start, dur, wave, vol] of SOUNDS[name] || []) {
+        for (const [freq, start, dur, wave, vol] of notes) {
           const osc = c.createOscillator();
           const gain = c.createGain();
           const t = c.currentTime + start;

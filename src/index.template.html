@@ -7,16 +7,20 @@
 <style>
   html, body { height: 100%; margin: 0; background: #000; overflow: hidden; }
   body { display: flex; align-items: center; justify-content: center; }
-  /* 1:2 aspect keeps cells square; height fits the window minus the panel's width */
-  canvas { background: #111; aspect-ratio: 1 / 2; height: min(calc(100vh - 32px), calc((100vw - 200px) * 2)); }
-  #panel { margin-left: 16px; color: #eee; font: 16px monospace; min-width: 120px; }
-  #panel div { margin-bottom: 12px; }
-  #panel span { display: block; font-size: 24px; }
+  /* --u is one playfield cell. Everything is sized in cells so the playfield,
+     next preview and side panel scale together: 10u playfield + 5u next
+     preview (4u plus margins) + 5u panel = 20u, within the 21u of width. */
+  :root { --u: min(calc((100vh - 32px) / 20), calc(100vw / 21)); }
+  #playfield { background: #111; width: calc(var(--u) * 10); height: calc(var(--u) * 20); }
+  #next { background: #111; width: calc(var(--u) * 4); height: calc(var(--u) * 4); align-self: flex-start; margin: calc(var(--u) * 0.5); }
+  #panel { color: #eee; font: calc(var(--u) * 0.55) monospace; width: calc(var(--u) * 5); }
+  #panel div { margin-bottom: calc(var(--u) * 0.4); }
+  #panel span { display: block; font-size: calc(var(--u) * 0.8); }
 </style>
 </head>
 <body>
 <canvas id="playfield"></canvas>
-<canvas id="next" width="120" height="120" style="align-self:flex-start;margin:16px"></canvas>
+<canvas id="next"></canvas>
 <div id="panel">
   <div>SCORE<span id="score">0</span></div>
   <div>LEVEL<span id="level">0</span></div>
@@ -29,6 +33,9 @@
 </script>
 <script>
 /*{{REPEAT}}*/
+</script>
+<script>
+/*{{KEYS}}*/
 </script>
 <script>
 /*{{HIGHSCORE}}*/

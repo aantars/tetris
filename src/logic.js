@@ -106,6 +106,13 @@ function gravityInterval(level) {
   return (frames * 1000) / 60;
 }
 
+const SOFT_DROP_MS = 50;
+
+// Milliseconds between soft-drop steps: 50 ms, but never slower than gravity.
+function softDropInterval(level) {
+  return Math.min(SOFT_DROP_MS, gravityInterval(level));
+}
+
 const LINE_SCORES = [0, 40, 100, 300, 1200];
 const LINES_PER_LEVEL = 10;
 
@@ -139,17 +146,21 @@ function lock(state, random) {
   };
 }
 
-// Gravity: fall one row; locks the moment it can fall no further (no lock delay).
+// Lock the active tetromino if it can fall no further (no lock delay).
+function lockIfGrounded(state, random) {
+  return fits(state.playfield, state.active, 0, 1) ? state : lock(state, random);
+}
+
+// Gravity: fall one row; locks the moment it can fall no further.
 function tick(state, random) {
   const fallen = fits(state.playfield, state.active, 0, 1) ? moved(state, 0, 1) : state;
-  return fits(fallen.playfield, fallen.active, 0, 1) ? fallen : lock(fallen, random);
+  return lockIfGrounded(fallen, random);
 }
 
 // Soft drop: fall one row for 1 point; locks the moment it can fall no further.
 function softDrop(state, random) {
   if (!fits(state.playfield, state.active, 0, 1)) return state;
-  const fallen = { ...moved(state, 0, 1), score: state.score + 1 };
-  return fits(fallen.playfield, fallen.active, 0, 1) ? fallen : lock(fallen, random);
+  return lockIfGrounded({ ...moved(state, 0, 1), score: state.score + 1 }, random);
 }
 
 // Hard drop: fall to the lowest reachable row for 2 points per row, then lock.
@@ -158,9 +169,9 @@ function hardDrop(state, random) {
   while (fits(state.playfield, state.active, 0, rows + 1)) rows++;
   return lock({ ...moved(state, 0, rows), score: state.score + 2 * rows }, random);
 }
-// Events: { type: 'left' | 'right' | 'tick' | 'softDrop' | 'hardDrop' | 'start' | 'pause' | 'restart' }.
-// status is 'start' | 'playing' | 'paused' | 'gameover'; movement, gravity and
-// drops only act while playing. Later tickets add rotate.
+// Events: { type: 'left' | 'right' | 'rotateCW' | 'rotateCCW' | 'softDrop' | 'hardDrop' | 'tick' | 'start' | 'restart' | 'pause' }.
+// status is 'start' | 'playing' | 'paused' | 'gameover'; movement, rotation,
+// gravity and drops only act while playing.
 function update(state, event, random = Math.random) {
   switch (event.type) {
     case 'start':
@@ -193,5 +204,5 @@ function update(state, event, random = Math.random) {
   }
 }
 
-const logic = { newGame, startScreen, update, gravityInterval, WIDTH, HEIGHT, TYPES, COLORS, SHAPES };
+const logic = { newGame, startScreen, update, gravityInterval, softDropInterval, WIDTH, HEIGHT, TYPES, COLORS, SHAPES };
 if (typeof module !== 'undefined') module.exports = logic;

@@ -1,6 +1,6 @@
 ﻿const test = require('node:test');
 const assert = require('node:assert');
-const { newGame, update, gravityInterval, WIDTH, HEIGHT, TYPES } = require('../src/logic.js');
+const { newGame, update, gravityInterval, softDropInterval, WIDTH, HEIGHT, TYPES } = require('../src/logic.js');
 
 // A fixed random source: yields the given values in order, then repeats the last.
 function fixed(...values) {
@@ -317,4 +317,13 @@ test('hard drop of a tetromino already resting scores nothing but still locks', 
   const after = update(setup.state, { type: 'hardDrop' }, setup.random);
   assert.strictEqual(after.score, 0);
   assert.strictEqual(filledCount(after), 4);
+});
+
+test('soft drop is never slower than gravity at the current level', () => {
+  assert.strictEqual(softDropInterval(0), 50);
+  assert.strictEqual(softDropInterval(9), 50); // gravity 100 ms
+  for (let level = 0; level <= 35; level++) {
+    assert.ok(softDropInterval(level) <= gravityInterval(level), `level ${level}`);
+  }
+  assert.ok(Math.abs(softDropInterval(29) - 1000 / 60) < 1e-9);
 });
