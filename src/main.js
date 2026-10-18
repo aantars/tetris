@@ -1,4 +1,4 @@
-// Presentation layer: rendering, keyboard input and the gravity timer.
+﻿// Presentation layer: rendering, keyboard input and the gravity timer.
 // Holds no game rules. Uses globals from the inlined logic.js
 // (newGame, update, WIDTH, HEIGHT, COLORS).
 
@@ -17,7 +17,14 @@ function drawCell(x, y, type) {
   ctx.fillRect(x * CELL, y * CELL, CELL - 1, CELL - 1);
 }
 
+function renderPanel() {
+  for (const key of ['score', 'level', 'lines']) {
+    document.getElementById(key).textContent = state[key];
+  }
+}
+
 function render() {
+  renderPanel();
   ctx.fillStyle = '#111';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   state.playfield.forEach((row, y) => row.forEach((type, x) => type && drawCell(x, y, type)));
