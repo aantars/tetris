@@ -21,6 +21,7 @@
   <div>SCORE<span id="score">0</span></div>
   <div>LEVEL<span id="level">0</span></div>
   <div>LINES<span id="lines">0</span></div>
+  <div>HIGH SCORE<span id="highscore">0</span></div>
 </div>
 <script>
 ﻿// Pure game logic: no DOM, no globals. Public interface:
@@ -268,6 +269,39 @@ if (typeof module !== 'undefined') module.exports = repeat;
 
 </script>
 <script>
+// High score decision and persistence. No DOM: callers pass in a storage
+// object (localStorage in the browser); any storage failure is swallowed so
+// the game works without it. Holds no game rules.
+
+const HIGH_SCORE_KEY = 'tetris.highScore';
+
+// The high score after a game reaches `score`.
+function nextHighScore(high, score) {
+  return score > high ? score : high;
+}
+
+function loadHighScore(storage) {
+  try {
+    const n = Number.parseInt(storage.getItem(HIGH_SCORE_KEY), 10);
+    return n > 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function saveHighScore(storage, value) {
+  try {
+    storage.setItem(HIGH_SCORE_KEY, String(value));
+  } catch {
+    // storage unavailable or full: keep playing without persistence
+  }
+}
+
+const highscore = { nextHighScore, loadHighScore, saveHighScore, HIGH_SCORE_KEY };
+if (typeof module !== 'undefined') module.exports = highscore;
+
+</script>
+<script>
 ﻿// Presentation layer: rendering, keyboard input and the gravity timer.
 // Holds no game rules. Uses globals from the inlined logic.js
 // (newGame, update, WIDTH, HEIGHT, COLORS) and repeat.js (createRepeater).
@@ -280,6 +314,13 @@ canvas.height = HEIGHT * CELL;
 const ctx = canvas.getContext('2d');
 
 let state = startScreen();
+
+// Best score, persisted in localStorage (may be unavailable; guarded in highscore.js).
+function getStorage() {
+  try { return window.localStorage; } catch { return undefined; }
+}
+const storage = getStorage();
+let highScore = loadHighScore(storage);
 
 const OVERLAYS = {
   start: ['Press Enter to start'],
@@ -308,6 +349,12 @@ function drawCell(x, y, type) {
 }
 
 function renderPanel() {
+  const best = nextHighScore(highScore, state.score);
+  if (best !== highScore) {
+    highScore = best;
+    saveHighScore(storage, highScore);
+  }
+  document.getElementById('highscore').textContent = highScore;
   for (const key of ['score', 'level', 'lines']) {
     document.getElementById(key).textContent = state[key];
   }
